@@ -11,6 +11,7 @@ from tensorflow import keras
 from tensorflow.keras import layers
 from tensorflow.keras.models import Sequential
 
+# run tensorflow on cpu
 os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
 
 script_dir = Path(__file__).parent.resolve()
@@ -19,18 +20,29 @@ cirrus_dir = data_dir/'cirrus'
 not_cirrus_dir = data_dir/'not cirrus'
 img_dir = script_dir/'images'
 
+batch_size = 32
+img_width = 1296
+img_height = 972 # smaller image size for better performance
+
+'''
+Code for testing various ways to highlight cirrus clouds
+
+Sources:
+  https://www.researchgate.net/publication/254063335_Thin_Cloud_Detection_of_All-Sky_Images_Using_Markov_Random_Fields
+  https://journals.ametsoc.org/view/journals/atot/23/3/jtech1833_1.xml
+  https://d-nb.info/1142252418/34
+  
+The sources above define certain metrics to make identifying cirrus clouds easier in RGB, ground-based imagery. As such, we tested them to see whether they
+could improve the performance of the model by replacing the data in the color channels with the aforementioned metrics in various combinations,
+such as the ones below.
+
+Combination 1 gave the best results, but it was inferior to the plain image, which was partly expected as the photos were taken from space, not from Earth.
+'''
+
 combinations = [img_dir/'Combination 1 -- rbd, intensity, egd',
                 img_dir/'Combination 2 -- nrbr, saturation, egd',
                 img_dir/'Combination 3 -- hue, satruation, egd',
                 img_dir/'Combination 4 -- hue, intensity, egd']
-
-batch_size = 32
-img_width = 1296
-img_height = 972
-
-# for every image, turn it's pixels to arrays containing more useful data
-
-# different metrics one can use to better identify cirrus clouds
 
 
 def hue(r, g, b):
@@ -53,7 +65,7 @@ def intensity(r, g, b):
     return np.uint8((r + b + g) / 3)
 
 
-def brr(r, b):
+def brr(r, b):             # blue-red ratio
 
     if r == 0:
         r = 0.0001
@@ -61,12 +73,12 @@ def brr(r, b):
     return np.uint8(b / r)
 
 
-def rbd(r, b):
+def rbd(r, b):            # red-blue difference
 
     return np.uint8(r - b)
 
 
-def nrbr(r, b):
+def nrbr(r, b):           # normalized red-blue ratio
 
     d = b + r
     if d == 0:
@@ -90,37 +102,29 @@ def saturation(r, g, b):
     return np.uint8(ans * 255)
 
 
-def egd(r, g, b):
+def egd(r, g, b):         # euclidean geometric distance
 
     ans = np.sqrt(r**2 + g**2 + b**2 - (r + g + b)**2 / 3)
 
     # linearly rescale from [0, 208] to [0, 255]
     return np.uint8(ans / 208 * 255)
-
+  
 
 def preprocess(img_path, c, name):
 
     for index in range(0, len(combinations)):
 
-        # get the image
         image = Image.open(img_path)
-
-        # rezise
         image = image.resize((img_width, img_height))
 
-        # transform to numpy array
         array = asarray(image)
 
-        # iterate through every pixel
         for row in array:
             for pixel in row:
-
-                # get rgb values
+              
                 r = float(pixel[0])
                 g = float(pixel[1])
                 b = float(pixel[2])
-
-                # construct new image
 
                 if index == 0:
                     pixel[0] = rbd(r, b)
@@ -139,7 +143,6 @@ def preprocess(img_path, c, name):
                     pixel[1] = intensity(r, g, b)
                     pixel[2] = egd(r, g, b)
 
-        # save the new image
         new_img = Image.fromarray(array)
 
         if c == 1:
@@ -150,19 +153,16 @@ def preprocess(img_path, c, name):
 
 # preprocess the images
 
-'''
 for filename in os.listdir(cirrus_dir):
 
     preprocess(cirrus_dir/filename, 1, filename)
 
 for filename in os.listdir(not_cirrus_dir):
 
-    preprocess(not_cirrus_dir/filename, 0, filename)'''
-'''
-what = script_dir/'dumb mf'
-for filename in os.listdir(what):
+    preprocess(not_cirrus_dir/filename, 0, filename)
 
-    preprocess(what/filename, 1, filename)'''
+    
+# create datasets
 
 training_dataset = tf.keras.utils.image_dataset_from_directory(
 
@@ -190,6 +190,9 @@ classes_no = len(class_names)
 AUTOTUNE = tf.data.AUTOTUNE
 training_dataset = training_dataset.cache().shuffle(1000).prefetch(buffer_size=AUTOTUNE)
 validation_dataset = validation_dataset.cache().prefetch(buffer_size=AUTOTUNE)
+
+
+# create the model
 
 data_augmentation = keras.Sequential(
   [
@@ -229,6 +232,8 @@ history = model.fit(
     validation_data=validation_dataset,
     epochs=epochs
 )
+
+# visualize the learning curve
 
 acc = history.history['accuracy']
 val_acc = history.history['val_accuracy']
