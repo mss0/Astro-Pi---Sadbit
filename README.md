@@ -1,3 +1,3 @@
 # Astro-Pi---Sadbit
 
-fuck you
+Certified shit
